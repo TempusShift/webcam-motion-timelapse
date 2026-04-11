@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laser Timelapse Sessions</title>
+<style>
+  :root {
+    --bg: #0d0d0d; --surface: #161616; --border: #2a2a2a;
+    --accent: #ff6a00; --accent-dim: #ff6a0022;
+    --text: #e8e8e8; --muted: #777;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; padding: 2rem; }
+
+  header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; }
+  h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  #count { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); margin-left: auto; }
+
+  /* status bar */
+  .status-bar { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; font-family: var(--mono); color: var(--muted); margin-bottom: 0.6rem; padding: 0.6rem 0.9rem; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); flex-wrap: wrap; }
+  .status-bar.recording { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .status-bar.watching  { border-color: #2a2a2a; }
+  .status-bar.idle      { border-color: #2a2a2a; color: #444; }
+  .status-icon { font-size: 1rem; flex-shrink: 0; }
+  .status-main { flex: 1; }
+
+  /* progress bar */
+  .progress-wrap { width: 100%; margin-top: 0.5rem; }
+  .progress-track { height: 4px; background: #2a2a2a; border-radius: 2px; overflow: hidden; margin-bottom: 0.3rem; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 10s linear; }
+  .progress-labels { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--accent); opacity: 0.8; }
+
+  /* reference picker */
+  .ref-bar { display: flex; align-items: center; gap: 0.6rem; font-size: 0.75rem; font-family: var(--mono); color: var(--muted); margin-bottom: 1.5rem; padding: 0.5rem 0.9rem; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); flex-wrap: wrap; }
+  .ref-bar select { background: #1e1e1e; border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); font-size: 0.72rem; padding: 0.2rem 0.4rem; flex: 1; min-width: 0; }
+  .ref-bar select:focus { outline: none; border-color: var(--accent); }
+  .ref-bar .ref-clear { cursor: pointer; color: var(--muted); background: none; border: none; font-size: 0.75rem; padding: 0; }
+  .ref-bar .ref-clear:hover { color: var(--accent); }
+
+  /* live section */
+  .live-section { margin-bottom: 1.5rem; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .live-header { display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1rem; cursor: pointer; user-select: none; background: var(--surface); }
+  .live-header:hover { background: #1c1c1c; }
+  .live-header h2 { font-size: 0.8rem; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; flex: 1; }
+  .live-chevron { font-size: 0.7rem; color: var(--muted); transition: transform 0.2s; }
+  .live-section.open .live-chevron { transform: rotate(180deg); }
+  .live-body { display: none; padding: 1rem; background: var(--bg); }
+  .live-section.open .live-body { display: block; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; animation: pulse 1.5s ease-in-out infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .live-dot.offline { background: var(--muted); animation: none; }
+  .live-frame { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; max-width: 480px; width: 100%; margin-bottom: 0.6rem; }
+  .live-frame img { width: 100%; display: block; background: #111; aspect-ratio: 4/3; object-fit: cover; }
+  .live-footer { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .live-updated { font-size: 0.7rem; font-family: var(--mono); color: var(--muted); flex: 1; }
+  .live-interval { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--muted); font-family: var(--mono); }
+  .live-interval input { width: 52px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); font-size: 0.75rem; padding: 0.2rem 0.4rem; text-align: center; }
+  .live-interval input:focus { outline: none; border-color: var(--accent); }
+
+  /* sessions */
+  .section-label { font-size: 0.8rem; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem; }
+  #sessions-status { color: var(--muted); font-size: 0.9rem; padding: 3rem 0; text-align: center; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.25rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; transition: border-color 0.15s; }
+  .card:hover { border-color: var(--accent); }
+  .card.is-ref { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card video { width: 100%; aspect-ratio: 4/3; display: block; background: #000; }
+  .card-info { padding: 0.85rem 1rem 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .card-time { font-size: 0.88rem; font-weight: 500; }
+  .card-relative { font-size: 0.75rem; color: var(--muted); }
+  .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.15rem; }
+  .badge { font-family: var(--mono); font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 3px; background: var(--accent-dim); color: var(--accent); }
+  .badge.muted { background: #1e1e1e; color: var(--muted); }
+  .badge.warn { background: #2a1a00; color: #ff9900; }
+  .card-actions { padding: 0 1rem 0.85rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .btn { display: inline-block; font-size: 0.75rem; font-family: var(--mono); color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.75rem; text-decoration: none; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+  .btn:hover { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  .btn.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+
+  @media (max-width: 500px) { body { padding: 1rem; } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔥 Laser <span>Timelapse</span></h1>
+  <span id="count"></span>
+</header>
+
+<!-- Status bar -->
+<div class="status-bar" id="status-bar">
+  <span class="status-icon" id="status-icon">⬜</span>
+  <div class="status-main">
+    <span id="status-text">Loading…</span>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+      <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+      <div class="progress-labels">
+        <span id="progress-elapsed">0m 0s elapsed</span>
+        <span id="progress-eta"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reference session picker -->
+<div class="ref-bar" id="ref-bar">
+  <span>⏱ reference session:</span>
+  <select id="ref-select"><option value="">— none selected —</option></select>
+  <button class="ref-clear" id="ref-clear" title="Clear reference">✕</button>
+</div>
+
+<!-- Live camera -->
+<div class="live-section" id="live-section">
+  <div class="live-header" id="live-toggle">
+    <span class="live-dot" id="live-dot"></span>
+    <h2>Live Camera</h2>
+    <span class="live-chevron">▲</span>
+  </div>
+  <div class="live-body">
+    <div class="live-frame"><img id="live-img" src="" alt="Live snapshot" /></div>
+    <div class="live-footer">
+      <span class="live-updated" id="live-updated">—</span>
+      <label class="live-interval">
+        refresh every
+        <input type="number" id="live-interval" value="30" min="2" max="300" />
+        s
+      </label>
+    </div>
+  </div>
+</div>
+
+<!-- Sessions grid -->
+<div class="section-label">Sessions</div>
+<div id="sessions-status">Loading sessions…</div>
+<div class="grid" id="grid"></div>
+
+<script>
+const SNAPSHOT_URL = 'http://192.168.0.142:8080/?action=snapshot';
+const LS_REF_KEY   = 'timelapse_ref_session';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmtDuration(seconds) {
+  if (seconds == null) return null;
+  const m = Math.floor(seconds / 60), s = Math.floor(seconds % 60);
+  return m ? `${m}m ${s}s` : `${s}s`;
+}
+
+function fmtRelative(isoStr) {
+  if (!isoStr) return '';
+  const diff = (Date.now() - new Date(isoStr)) / 1000;
+  if (diff < 60)    return 'just now';
+  if (diff < 3600)  return `${Math.floor(diff/60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  return `${Math.floor(diff/86400)}d ago`;
+}
+
+function fmtDateTime(isoStr) {
+  if (!isoStr) return '';
+  return new Date(isoStr).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  });
+}
+
+// ── Reference session (localStorage) ─────────────────────────────────────────
+
+let refSession = null;  // { name, active_seconds }
+
+function loadRef() {
+  try { refSession = JSON.parse(localStorage.getItem(LS_REF_KEY)); } catch {}
+}
+
+function saveRef(name, active_seconds) {
+  refSession = name ? { name, active_seconds } : null;
+  if (refSession) localStorage.setItem(LS_REF_KEY, JSON.stringify(refSession));
+  else localStorage.removeItem(LS_REF_KEY);
+  updateRefSelect();
+  updateCardHighlight();
+}
+
+function updateRefSelect() {
+  const sel = document.getElementById('ref-select');
+  sel.value = refSession ? refSession.name : '';
+}
+
+function updateCardHighlight() {
+  document.querySelectorAll('.card[data-session]').forEach(c => {
+    c.classList.toggle('is-ref', refSession && c.dataset.session === refSession.name);
+  });
+  document.querySelectorAll('.btn-ref').forEach(b => {
+    b.classList.toggle('active', refSession && b.dataset.session === refSession.name);
+    b.textContent = (refSession && b.dataset.session === refSession.name) ? '★ reference' : '☆ set reference';
+  });
+}
+
+// ── Status bar + progress ─────────────────────────────────────────────────────
+
+const statusBar    = document.getElementById('status-bar');
+const statusIcon   = document.getElementById('status-icon');
+const statusText   = document.getElementById('status-text');
+const progressWrap = document.getElementById('progress-wrap');
+const progressFill = document.getElementById('progress-fill');
+const progressElapsed = document.getElementById('progress-elapsed');
+const progressEta     = document.getElementById('progress-eta');
+
+let progressTimer = null;
+let currentStatus = null;
+
+function updateProgress() {
+  if (!currentStatus || currentStatus.state !== 'recording' || !currentStatus.session_started) return;
+
+  const elapsed = (Date.now() - new Date(currentStatus.session_started)) / 1000;
+  const expected = currentStatus.expected_sec || (refSession && refSession.active_seconds);
+
+  progressElapsed.textContent = `${fmtDuration(elapsed)} elapsed`;
+
+  if (expected) {
+    const pct = Math.min(100, (elapsed / expected) * 100);
+    progressFill.style.width = `${pct}%`;
+    const remaining = Math.max(0, expected - elapsed);
+    progressEta.textContent = remaining > 0
+      ? `~${fmtDuration(remaining)} remaining`
+      : 'should be finishing up…';
+  } else {
+    progressFill.style.width = '0%';
+    progressEta.textContent = 'no reference set';
+  }
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch(`/sessions/status.json?_=${Date.now()}`);
+    if (!res.ok) throw new Error();
+    currentStatus = await res.json();
+    const s = currentStatus;
+
+    if (s.state === 'recording') {
+      statusBar.className = 'status-bar recording';
+      statusIcon.textContent = '🔴';
+      statusText.textContent = `Recording — ${s.session || ''}`;
+      progressWrap.style.display = 'block';
+      updateProgress();
+      if (!progressTimer) progressTimer = setInterval(updateProgress, 1000);
+    } else {
+      statusBar.className = `status-bar ${s.state === 'watching' ? 'watching' : 'idle'}`;
+      statusIcon.textContent = s.state === 'watching' ? '👁' : '⬜';
+      statusText.textContent = s.state === 'watching' ? 'Watching for activity' : 'Monitor offline';
+      progressWrap.style.display = 'none';
+      clearInterval(progressTimer);
+      progressTimer = null;
+      currentStatus = s;
+    }
+  } catch {
+    statusBar.className = 'status-bar idle';
+    statusIcon.textContent = '⬜';
+    statusText.textContent = 'Monitor offline or unreachable';
+    progressWrap.style.display = 'none';
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+
+pollStatus();
+setInterval(pollStatus, 10000);
+
+// ── Live camera ───────────────────────────────────────────────────────────────
+
+const liveSection  = document.getElementById('live-section');
+const liveToggle   = document.getElementById('live-toggle');
+const liveImg      = document.getElementById('live-img');
+const liveDot      = document.getElementById('live-dot');
+const liveUpdated  = document.getElementById('live-updated');
+const liveInterval = document.getElementById('live-interval');
+let snapshotTimer  = null;
+
+function refreshSnapshot() {
+  const url = `${SNAPSHOT_URL}&_=${Date.now()}`;
+  const probe = new Image();
+  probe.onload = () => {
+    liveImg.src = url;
+    liveDot.classList.remove('offline');
+    liveUpdated.textContent = `updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}`;
+  };
+  probe.onerror = () => {
+    liveDot.classList.add('offline');
+    liveUpdated.textContent = 'camera offline';
+  };
+  probe.src = url;
+}
+
+function startSnapshotTimer() {
+  clearInterval(snapshotTimer);
+  const sec = Math.max(2, parseInt(liveInterval.value) || 30);
+  snapshotTimer = setInterval(refreshSnapshot, sec * 1000);
+}
+
+liveToggle.addEventListener('click', () => {
+  const open = liveSection.classList.toggle('open');
+  if (open) { refreshSnapshot(); startSnapshotTimer(); }
+  else clearInterval(snapshotTimer);
+});
+
+liveInterval.addEventListener('change', () => {
+  if (liveSection.classList.contains('open')) startSnapshotTimer();
+});
+
+// Start collapsed, but pre-fetch
+refreshSnapshot();
+
+// ── Sessions grid ─────────────────────────────────────────────────────────────
+
+const sessionMetas = {};  // name -> meta object
+
+async function loadSessions() {
+  const statusEl = document.getElementById('sessions-status');
+  const grid     = document.getElementById('grid');
+  const count    = document.getElementById('count');
+  const refSel   = document.getElementById('ref-select');
+
+  try {
+    const res = await fetch('/sessions/', { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(res.statusText);
+    const entries = await res.json();
+
+    const dirs = entries
+      .filter(e => e.type === 'directory')
+      .sort((a, b) => b.name.localeCompare(a.name));
+
+    statusEl.style.display = 'none';
+
+    if (!dirs.length) {
+      grid.innerHTML = '<p style="color:var(--muted);padding:3rem 0;text-align:center;grid-column:1/-1">No sessions yet.</p>';
+      return;
+    }
+
+    count.textContent = `${dirs.length} session${dirs.length !== 1 ? 's' : ''}`;
+
+    for (const dir of dirs) {
+      const name = dir.name.replace(/\/$/, '');
+
+      const dirRes = await fetch(`/sessions/${name}/`, { headers: { Accept: 'application/json' } });
+      if (!dirRes.ok) continue;
+      const files = await dirRes.json();
+
+      const mp4  = files.find(f => f.name.endsWith('.mp4'));
+      const metaFile = files.find(f => f.name === 'meta.json');
+      if (!mp4) continue;
+
+      const videoUrl = `/sessions/${name}/${mp4.name}`;
+      let started = null, activeSec = null, totalSec = null, recovered = false;
+
+      if (metaFile) {
+        try {
+          const m = await (await fetch(`/sessions/${name}/meta.json`)).json();
+          started   = m.started;
+          activeSec = m.active_seconds;
+          totalSec  = m.total_seconds;
+          recovered = !!m.recovered;
+          sessionMetas[name] = m;
+        } catch {}
+      }
+
+      if (!started) {
+        const p = name.match(/session_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+        if (p) started = `${p[1]}-${p[2]}-${p[3]}T${p[4]}:${p[5]}:${p[6]}`;
+      }
+
+      // Add to reference picker if it has active duration
+      if (activeSec) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = `${fmtDateTime(started)} — ${fmtDuration(activeSec)} active`;
+        refSel.appendChild(opt);
+      }
+
+      const sizeMB    = mp4.size ? (mp4.size / 1048576).toFixed(1) + ' MB' : '';
+      const activeDur = fmtDuration(activeSec);
+      const totalDur  = fmtDuration(totalSec);
+      const isRef     = refSession && refSession.name === name;
+
+      const card = document.createElement('div');
+      card.className = `card${isRef ? ' is-ref' : ''}`;
+      card.dataset.session = name;
+      card.innerHTML = `
+        <video src="${videoUrl}" controls preload="metadata" playsinline></video>
+        <div class="card-info">
+          <div class="card-time">${fmtDateTime(started)}</div>
+          <div class="card-relative">${fmtRelative(started)}</div>
+          <div class="badges">
+            ${activeDur ? `<span class="badge">⚡ ${activeDur} active</span>` : ''}
+            ${totalDur  ? `<span class="badge muted">⏱ ${totalDur} total</span>` : ''}
+            ${sizeMB    ? `<span class="badge muted">${sizeMB}</span>` : ''}
+            ${recovered ? `<span class="badge warn">♻ recovered</span>` : ''}
+          </div>
+        </div>
+        <div class="card-actions">
+          <a class="btn" href="${videoUrl}" download="${mp4.name}">⬇ download</a>
+          ${activeSec ? `<button class="btn btn-ref${isRef ? ' active' : ''}" data-session="${name}" data-active-sec="${activeSec}">${isRef ? '★ reference' : '☆ set reference'}</button>` : ''}
+        </div>
+      `;
+      grid.appendChild(card);
+    }
+
+    // Wire up ref buttons
+    document.querySelectorAll('.btn-ref').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.session;
+        const sec  = parseFloat(btn.dataset.activeSec);
+        if (refSession && refSession.name === name) {
+          saveRef(null, null);
+        } else {
+          saveRef(name, sec);
+        }
+      });
+    });
+
+    updateRefSelect();
+
+  } catch (e) {
+    statusEl.textContent = `Error loading sessions: ${e.message}`;
+    console.error(e);
+  }
+}
+
+// Reference select dropdown
+document.getElementById('ref-select').addEventListener('change', e => {
+  const name = e.target.value;
+  if (!name) { saveRef(null, null); return; }
+  const meta = sessionMetas[name];
+  saveRef(name, meta ? meta.active_seconds : null);
+});
+
+document.getElementById('ref-clear').addEventListener('click', () => saveRef(null, null));
+
+loadRef();
+loadSessions();
+</script>
+</body>
+</html>

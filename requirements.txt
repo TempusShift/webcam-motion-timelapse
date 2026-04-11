@@ -1,0 +1,6 @@
+requests
+pillow
+numpy
+python-dotenv
+pyyaml
+tzdata

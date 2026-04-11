@@ -1,0 +1,19 @@
+snapshot_url: http://192.168.0.142:8080/?action=snapshot
+output_dir: timelapse_sessions
+interval_sec: 5
+timezone: America/Chicago
+diff_threshold: 6.0
+start_threshold: 12.0
+start_consecutive: 4
+diff_resize:
+- 648
+- 486
+idle_reset_frames: 5
+min_session_sec: 120
+idle_stop_sec: 120
+request_timeout: 10
+ffmpeg_fps: 24
+file_server_base: http://nas.lan:8181/sessions
+discord_max_mb: 25
+discord_snapshot_sec: 1800
+api_port: 7820

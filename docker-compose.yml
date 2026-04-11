@@ -1,0 +1,33 @@
+services:
+  timelapse:
+    image: python:3.12-slim
+    container_name: lightburn_timelapse
+    restart: unless-stopped
+    stop_grace_period: 30s
+    working_dir: /app
+    volumes:
+      - /home/andrew/lightburn_timelapse:/app
+      - timelapse_deps:/usr/local/lib/python3.12/site-packages
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "pip install -r requirements.txt --break-system-packages -q --root-user-action=ignore &&
+             apt-get update -qq && apt-get install -y -qq ffmpeg &&
+             python3 timelapse.py"
+    network_mode: host
+
+  fileserver:
+    image: nginx:alpine
+    container_name: lightburn_fileserver
+    restart: unless-stopped
+    ports:
+      - "8181:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /home/andrew/lightburn_timelapse/timelapse_sessions:/usr/share/nginx/html/sessions:ro
+      - /home/andrew/lightburn_timelapse/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /home/andrew/lightburn_timelapse/index.html:/usr/share/nginx/html/index.html:ro
+
+volumes:
+  timelapse_deps:

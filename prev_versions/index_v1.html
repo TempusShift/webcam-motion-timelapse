@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laser Timelapse Sessions</title>
+<style>
+  :root {
+    --bg: #0d0d0d; --surface: #161616; --border: #2a2a2a;
+    --accent: #ff6a00; --accent-dim: #ff6a0022;
+    --text: #e8e8e8; --muted: #777;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; padding: 2rem; }
+  header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; }
+  h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  #count { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); margin-left: auto; }
+  #status { color: var(--muted); font-size: 0.9rem; padding: 3rem 0; text-align: center; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.25rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; transition: border-color 0.15s; }
+  .card:hover { border-color: var(--accent); }
+  .card video { width: 100%; aspect-ratio: 4/3; display: block; background: #000; }
+  .card-info { padding: 0.85rem 1rem 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .card-time { font-size: 0.88rem; font-weight: 500; }
+  .card-relative { font-size: 0.75rem; color: var(--muted); }
+  .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.15rem; }
+  .badge {
+    font-family: var(--mono); font-size: 0.7rem;
+    padding: 0.15rem 0.5rem; border-radius: 3px;
+    background: var(--accent-dim); color: var(--accent);
+  }
+  .badge.muted { background: #1e1e1e; color: var(--muted); }
+  .badge.warn { background: #2a1a00; color: #ff9900; }
+  .card-actions { padding: 0 1rem 0.85rem; }
+  .btn { display: inline-block; font-size: 0.75rem; font-family: var(--mono); color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.75rem; text-decoration: none; transition: border-color 0.15s, background 0.15s; }
+  .btn:hover { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  @media (max-width: 500px) { body { padding: 1rem; } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔥 Laser <span>Timelapse</span></h1>
+  <span id="count"></span>
+</header>
+<div id="status">Loading sessions…</div>
+<div class="grid" id="grid"></div>
+
+<script>
+function fmtDuration(seconds) {
+  if (!seconds) return null;
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  return m ? `${m}m ${s}s` : `${s}s`;
+}
+
+function fmtRelative(isoStr) {
+  if (!isoStr) return '';
+  const diff = (Date.now() - new Date(isoStr)) / 1000;
+  if (diff < 60)   return 'just now';
+  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  return `${Math.floor(diff/86400)}d ago`;
+}
+
+function fmtDateTime(isoStr) {
+  if (!isoStr) return '';
+  return new Date(isoStr).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  });
+}
+
+async function loadSessions() {
+  const status = document.getElementById('status');
+  const grid   = document.getElementById('grid');
+  const count  = document.getElementById('count');
+
+  try {
+    const res = await fetch('/sessions/', { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(res.statusText);
+    const entries = await res.json();
+
+    const dirs = entries
+      .filter(e => e.type === 'directory')
+      .sort((a, b) => b.name.localeCompare(a.name));
+
+    status.style.display = 'none';
+
+    if (!dirs.length) {
+      grid.innerHTML = '<p style="color:var(--muted);padding:3rem 0;text-align:center;grid-column:1/-1">No sessions yet.</p>';
+      return;
+    }
+
+    count.textContent = `${dirs.length} session${dirs.length !== 1 ? 's' : ''}`;
+
+    for (const dir of dirs) {
+      const name = dir.name.replace(/\/$/, '');
+
+      // Fetch session dir listing
+      const dirRes = await fetch(`/sessions/${name}/`, { headers: { Accept: 'application/json' } });
+      if (!dirRes.ok) continue;
+      const files = await dirRes.json();
+
+      const mp4  = files.find(f => f.name.endsWith('.mp4'));
+      const meta = files.find(f => f.name === 'meta.json');
+      if (!mp4) continue;
+
+      const videoUrl = `/sessions/${name}/${mp4.name}`;
+      let started = null, activeSec = null, totalSec = null, recovered = false;
+
+      if (meta) {
+        try {
+          const mRes = await fetch(`/sessions/${name}/meta.json`);
+          const m = await mRes.json();
+          started   = m.started;
+          activeSec = m.active_seconds;
+          totalSec  = m.total_seconds;
+          recovered = !!m.recovered;
+        } catch {}
+      }
+
+      // Fallback: parse timestamp from dir name
+      if (!started) {
+        const p = name.match(/session_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+        if (p) started = `${p[1]}-${p[2]}-${p[3]}T${p[4]}:${p[5]}:${p[6]}`;
+      }
+
+      const sizeMB = mp4.size ? (mp4.size / 1048576).toFixed(1) + ' MB' : '';
+      const activeDur = fmtDuration(activeSec);
+      const totalDur  = fmtDuration(totalSec);
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <video src="${videoUrl}" controls preload="metadata" playsinline></video>
+        <div class="card-info">
+          <div class="card-time">${fmtDateTime(started)}</div>
+          <div class="card-relative">${fmtRelative(started)}</div>
+          <div class="badges">
+            ${activeDur  ? `<span class="badge">⚡ ${activeDur} active</span>` : ''}
+            ${totalDur   ? `<span class="badge muted">⏱ ${totalDur} total</span>` : ''}
+            ${sizeMB     ? `<span class="badge muted">${sizeMB}</span>` : ''}
+            ${recovered  ? `<span class="badge warn">♻ recovered</span>` : ''}
+          </div>
+        </div>
+        <div class="card-actions">
+          <a class="btn" href="${videoUrl}" download="${mp4.name}">⬇ download</a>
+        </div>
+      `;
+      grid.appendChild(card);
+    }
+  } catch (e) {
+    status.textContent = `Error loading sessions: ${e.message}`;
+    console.error(e);
+  }
+}
+
+loadSessions();
+</script>
+</body>
+</html>
